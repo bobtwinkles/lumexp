@@ -58,8 +58,8 @@ luminance::uniform_interface! {
 
 luminance::uniform_interface! {
     struct BlurInterface {
-        horizontal: bool,
-        blur_tex: &'static BoundTexture<'static, Flat, Dim2, RGB32F>
+        blur_tex: &'static BoundTexture<'static, Flat, Dim2, RGB32F>,
+        radius: f32
     }
 }
 
@@ -139,7 +139,7 @@ fn main() {
                 let tex = pipeline.bind_texture(&buffers.intermediate_buffer.color_slot().1);
 
                 shader_gate.shade(&blur_prog, |render_gate, interface| {
-                    interface.horizontal.update(false);
+                    interface.radius.update(0.0);
                     interface
                         .blur_tex
                         .update(&tex);
@@ -151,7 +151,8 @@ fn main() {
             },
         );
 
-        for _ in 0..5 {
+        for i in 0..2 {
+            let rad = i + 1;
             surface.pipeline_builder().pipeline(
                 &buffers.blur_buffer1,
                 [0.0, 0.0, 0.0, 0.0],
@@ -159,7 +160,7 @@ fn main() {
                     let tex = pipeline.bind_texture(buffers.blur_buffer0.color_slot());
 
                     shader_gate.shade(&blur_prog, |render_gate, interface| {
-                        interface.horizontal.update(true);
+                        interface.radius.update(rad as f32);
                         interface.blur_tex.update(&tex);
 
                         render_gate.render(RenderState::default(), |tesselation_gate| {
@@ -176,7 +177,7 @@ fn main() {
                     let tex = pipeline.bind_texture(&buffers.blur_buffer1.color_slot());
 
                     shader_gate.shade(&blur_prog, |render_gate, interface| {
-                        interface.horizontal.update(false);
+                        interface.radius.update((rad as f32) + 4.0);
                         interface
                             .blur_tex
                             .update(&tex);
