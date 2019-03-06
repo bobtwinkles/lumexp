@@ -25,6 +25,8 @@ const GEOM_VERTS: [Vertex2DColored; 3] = [
     ([-0.5, -0.5], [1., 0., 0., 1.0]),
 ];
 
+const BLUR_SIZE_FACTOR: u32 = 2;
+
 struct RenderBuffers {
     back_buffer: Framebuffer<Flat, Dim2, (), ()>,
     intermediate_buffer: Framebuffer<
@@ -39,7 +41,7 @@ struct RenderBuffers {
 
 impl RenderBuffers {
     fn new<C: GraphicsContext>(c: &mut C, d: <Dim2 as Dimensionable>::Size) -> Self {
-        let half_d = [d[0] / 2, d[1] / 2];
+        let half_d = [d[0] / BLUR_SIZE_FACTOR, d[1] / BLUR_SIZE_FACTOR];
         Self {
             back_buffer: Framebuffer::back_buffer(d),
             intermediate_buffer: Framebuffer::new(c, d, 0).expect("intermediate framebuffer"),
@@ -139,7 +141,7 @@ fn main() {
                 let tex = pipeline.bind_texture(&buffers.intermediate_buffer.color_slot().1);
 
                 shader_gate.shade(&blur_prog, |render_gate, interface| {
-                    interface.radius.update(0.0);
+                    interface.radius.update(0.25);
                     interface
                         .blur_tex
                         .update(&tex);
@@ -151,8 +153,10 @@ fn main() {
             },
         );
 
+        const BLUR_RADIUS_FACTOR: f32 = 0.25;
+
         for i in 0..2 {
-            let rad = i + 1;
+            let rad: f32 = (2 * i) as f32 * BLUR_RADIUS_FACTOR + 0.25;
             surface.pipeline_builder().pipeline(
                 &buffers.blur_buffer1,
                 [0.0, 0.0, 0.0, 0.0],
@@ -177,7 +181,7 @@ fn main() {
                     let tex = pipeline.bind_texture(&buffers.blur_buffer1.color_slot());
 
                     shader_gate.shade(&blur_prog, |render_gate, interface| {
-                        interface.radius.update((rad as f32) + 4.0);
+                        interface.radius.update((rad as f32) + BLUR_RADIUS_FACTOR);
                         interface
                             .blur_tex
                             .update(&tex);
