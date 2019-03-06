@@ -39,11 +39,12 @@ struct RenderBuffers {
 
 impl RenderBuffers {
     fn new<C: GraphicsContext>(c: &mut C, d: <Dim2 as Dimensionable>::Size) -> Self {
+        let half_d = [d[0] / 2, d[1] / 2];
         Self {
             back_buffer: Framebuffer::back_buffer(d),
             intermediate_buffer: Framebuffer::new(c, d, 0).expect("intermediate framebuffer"),
-            blur_buffer0: Framebuffer::new(c, d, 0).expect("blur framebuffer 0"),
-            blur_buffer1: Framebuffer::new(c, d, 0).expect("blur framebuffer 1"),
+            blur_buffer0: Framebuffer::new(c, half_d, 0).expect("blur framebuffer 0"),
+            blur_buffer1: Framebuffer::new(c, half_d, 0).expect("blur framebuffer 1"),
         }
     }
 }
