@@ -25,7 +25,7 @@ const GEOM_VERTS: [Vertex2DColored; 3] = [
     ([-0.5, -0.5], [1., 0., 0., 1.0]),
 ];
 
-const BLUR_SIZE_FACTOR: u32 = 2;
+const BLUR_SIZE_FACTOR: u32 = 4;
 
 struct RenderBuffers {
     back_buffer: Framebuffer<Flat, Dim2, (), ()>,
