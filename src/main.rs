@@ -1,42 +1,62 @@
 #[macro_use]
 extern crate luminance;
 
+#[macro_use]
+extern crate luminance_derive;
+
 use luminance::context::GraphicsContext;
 use luminance::framebuffer::Framebuffer;
 use luminance::pipeline::BoundTexture;
-use luminance::pixel::{Depth32F, RGB32F};
+use luminance::pixel::{Depth32F, RGB32F, R11G11B10F, Floating};
 use luminance::render_state::RenderState;
 use luminance::shader::program::Program;
-use luminance::tess::{Mode, Tess};
-use luminance::texture::{Dim2, Dimensionable, Flat, Texture};
+use luminance::tess::{Mode, TessBuilder};
+use luminance::texture::{Dim2, Dimensionable, Flat};
 use luminance_glfw::event::{Action, Key, WindowEvent};
 use luminance_glfw::surface::{GlfwSurface, Surface, WindowDim, WindowOpt};
 
 mod full_screen_tri;
 
-type Vertex2DColored = ([f32; 2], [f32; 4]);
+#[derive(Copy, Clone, Debug, Eq, PartialEq, VertexAttribSem)]
+pub enum Vertex2DColoredSemantics {
+    #[sem(name = "pos", repr = "[f32; 2]", type_name = "Vertex2DPosition")]
+    Position,
+    #[sem(name = "color", repr = "[f32; 4]", type_name = "VertexColor")]
+    Color,
+}
+
+#[derive(Vertex)]
+#[vertex(sem = "Vertex2DColoredSemantics")]
+struct Vertex2DColored {
+    position: Vertex2DPosition,
+    color: VertexColor,
+}
 
 const SIMPLE_FS: &'static str = include_str!("fs.glsl");
 const SIMPLE_VS: &'static str = include_str!("vs.glsl");
 
 const GEOM_VERTS: [Vertex2DColored; 3] = [
-    ([0.5, -0.5], [0., 1., 0., 1.0]),
-    ([0.0, 0.5], [0., 0., 1., 1.0]),
-    ([-0.5, -0.5], [1., 0., 0., 1.0]),
+    Vertex2DColored {
+        position: Vertex2DPosition::new([0.5, -0.5]),
+        color: VertexColor::new([0., 1., 0., 1.0]),
+    },
+    Vertex2DColored {
+        position: Vertex2DPosition::new([0.0, 0.5]),
+        color: VertexColor::new([0., 0., 1., 1.0]),
+    },
+    Vertex2DColored {
+        position: Vertex2DPosition::new([-0.5, -0.5]),
+        color: VertexColor::new([1., 0., 0., 1.0]),
+    },
 ];
 
 const BLUR_SIZE_FACTOR: u32 = 4;
 
 struct RenderBuffers {
     back_buffer: Framebuffer<Flat, Dim2, (), ()>,
-    intermediate_buffer: Framebuffer<
-        Flat,
-        Dim2,
-        (Texture<Flat, Dim2, RGB32F>, Texture<Flat, Dim2, RGB32F>),
-        Texture<Flat, Dim2, Depth32F>,
-    >,
-    blur_buffer0: Framebuffer<Flat, Dim2, Texture<Flat, Dim2, RGB32F>, ()>,
-    blur_buffer1: Framebuffer<Flat, Dim2, Texture<Flat, Dim2, RGB32F>, ()>,
+    intermediate_buffer: Framebuffer<Flat, Dim2, (RGB32F, RGB32F), Depth32F>,
+    blur_buffer0: Framebuffer<Flat, Dim2, R11G11B10F, ()>,
+    blur_buffer1: Framebuffer<Flat, Dim2, R11G11B10F, ()>,
 }
 
 impl RenderBuffers {
@@ -53,15 +73,8 @@ impl RenderBuffers {
 
 luminance::uniform_interface! {
     struct FinalShadeInterface {
-        main_tex: &'static BoundTexture<'static, Flat, Dim2, RGB32F>,
-        bright_tex: &'static BoundTexture<'static, Flat, Dim2, RGB32F>
-    }
-}
-
-luminance::uniform_interface! {
-    struct BlurInterface {
-        blur_tex: &'static BoundTexture<'static, Flat, Dim2, RGB32F>,
-        radius: f32
+        main_tex: &'static BoundTexture<'static, Flat, Dim2, Floating>,
+        bright_tex: &'static BoundTexture<'static, Flat, Dim2, Floating>
     }
 }
 
@@ -85,14 +98,23 @@ fn main() {
         full_screen_tri::VS,
         None,
         include_str!("blur.glsl"),
-    ).expect("blur shader");
+    )
+    .expect("blur shader");
 
     let (simple_prog, _) =
         Program::<Vertex2DColored, (), ()>::from_strings(None, SIMPLE_VS, None, SIMPLE_FS)
             .expect("simple program creation");
 
-    let fullscreen_triangles = Tess::attributeless(&mut surface, Mode::Triangle, 6);
-    let geometry_triangles = Tess::new(&mut surface, Mode::Triangle, &GEOM_VERTS[..], None);
+    let fullscreen_triangles = TessBuilder::new(&mut surface)
+        .set_vertex_nb(6)
+        .set_mode(Mode::Triangle)
+        .build()
+        .expect("Fullscreen tris");
+    let geometry_triangles = TessBuilder::new(&mut surface)
+        .add_vertices(&GEOM_VERTS[..])
+        .set_mode(Mode::Triangle)
+        .build()
+        .expect("Triangle geometry");
 
     let mut buffers = {
         let size = surface.size();
@@ -142,9 +164,7 @@ fn main() {
 
                 shader_gate.shade(&blur_prog, |render_gate, interface| {
                     interface.radius.update(0.25);
-                    interface
-                        .blur_tex
-                        .update(&tex);
+                    interface.blur_tex.update(&tex);
 
                     render_gate.render(RenderState::default(), |tesselation_gate| {
                         tesselation_gate.render(&mut surface, (&fullscreen_triangles).into());
@@ -182,9 +202,7 @@ fn main() {
 
                     shader_gate.shade(&blur_prog, |render_gate, interface| {
                         interface.radius.update((rad as f32) + BLUR_RADIUS_FACTOR);
-                        interface
-                            .blur_tex
-                            .update(&tex);
+                        interface.blur_tex.update(&tex);
 
                         render_gate.render(RenderState::default(), |tesselation_gate| {
                             tesselation_gate.render(&mut surface, (&fullscreen_triangles).into());
