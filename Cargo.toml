@@ -8,3 +8,4 @@ edition = "2018"
 luminance = { path = "../luminance-rs/luminance" }
 luminance-derive = { path = "../luminance-rs/luminance-derive" }
 luminance-glfw = { path = "../luminance-rs/luminance-glfw" }
+cgmath = "0.17"

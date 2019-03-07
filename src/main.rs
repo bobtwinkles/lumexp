@@ -15,48 +15,36 @@ use luminance::texture::{Dim2, Dimensionable, Flat};
 use luminance_glfw::event::{Action, Key, WindowEvent};
 use luminance_glfw::surface::{GlfwSurface, Surface, WindowDim, WindowOpt};
 
+use cgmath::prelude::*;
+use cgmath::Matrix4;
+
 mod error;
 mod full_screen_tri;
 mod passes;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, VertexAttribSem)]
-pub enum Vertex2DColoredSemantics {
-    #[sem(name = "pos", repr = "[f32; 2]", type_name = "Vertex2DPosition")]
+pub enum Vertex3DColoredSemantics {
+    #[sem(name = "pos", repr = "[f32; 3]", type_name = "Vertex3DPosition")]
     Position,
     #[sem(name = "color", repr = "[f32; 4]", type_name = "VertexColor")]
     Color,
 }
 
 #[derive(Vertex)]
-#[vertex(sem = "Vertex2DColoredSemantics")]
-struct Vertex2DColored {
-    position: Vertex2DPosition,
+#[vertex(sem = "Vertex3DColoredSemantics")]
+struct Vertex3DColored {
+    position: Vertex3DPosition,
     color: VertexColor,
 }
 
 const SIMPLE_FS: &'static str = include_str!("fs.glsl");
 const SIMPLE_VS: &'static str = include_str!("vs.glsl");
 
-const GEOM_VERTS: [Vertex2DColored; 3] = [
-    Vertex2DColored {
-        position: Vertex2DPosition::new([0.5, -0.5]),
-        color: VertexColor::new([0., 1., 0., 1.0]),
-    },
-    Vertex2DColored {
-        position: Vertex2DPosition::new([0.0, 0.5]),
-        color: VertexColor::new([0., 0., 1., 1.0]),
-    },
-    Vertex2DColored {
-        position: Vertex2DPosition::new([-0.5, -0.5]),
-        color: VertexColor::new([1., 0., 0., 1.0]),
-    },
-];
-
 const BLUR_SIZE_FACTOR: u32 = 4;
 
 struct RenderBuffers {
     back_buffer: Framebuffer<Flat, Dim2, (), ()>,
-    intermediate_buffer: Framebuffer<Flat, Dim2, (RGB32F, RGB32F), Depth32F>,
+    intermediate_buffer: Framebuffer<Flat, Dim2, (R11G11B10F, R11G11B10F), Depth32F>,
 }
 
 impl RenderBuffers {
@@ -69,15 +57,71 @@ impl RenderBuffers {
 }
 
 luminance::uniform_interface! {
+    struct GeometryShadeInterface {
+        transform: [[f32; 4]; 4]
+    }
+}
+
+luminance::uniform_interface! {
     struct FinalShadeInterface {
         main_tex: &'static BoundTexture<'static, Flat, Dim2, Floating>,
         bright_tex: &'static BoundTexture<'static, Flat, Dim2, Floating>
     }
 }
 
+fn gen_geometry() -> Vec<Vertex3DColored> {
+    const TRIANGLES_X: usize = 2;
+    const TRIANGLES_Y: usize = 2;
+    const TSCALE_X: f32 = 0.75 / (TRIANGLES_X as f32);
+    const TSCALE_Y: f32 = 0.75 / (TRIANGLES_Y as f32);
+
+    let mut geometry = Vec::with_capacity(6 * TRIANGLES_X * TRIANGLES_Y);
+    for x in 0..TRIANGLES_X {
+        let nx = (x as f32 + 0.5) / (TRIANGLES_X as f32) * 2.0 - 1.0;
+        for y in 0..TRIANGLES_Y {
+            let ny = (y as f32 + 0.5) / (TRIANGLES_Y as f32) * 2.0 - 1.0;
+
+            geometry.push(Vertex3DColored {
+                position: Vertex3DPosition::new([nx - TSCALE_X, ny - TSCALE_Y, 0.0]),
+                color: VertexColor::new([0., 1., 0., 1.0]),
+            });
+            geometry.push(Vertex3DColored {
+                position: Vertex3DPosition::new([nx - TSCALE_X, ny + TSCALE_Y, 0.0]),
+                color: VertexColor::new([0., 0., 1., 1.0]),
+            });
+            geometry.push(Vertex3DColored {
+                position: Vertex3DPosition::new([nx + TSCALE_X, ny + TSCALE_Y, 0.0]),
+                color: VertexColor::new([1., 0., 0., 1.0]),
+            });
+            geometry.push(Vertex3DColored {
+                position: Vertex3DPosition::new([nx - TSCALE_X, ny - TSCALE_Y, 0.0]),
+                color: VertexColor::new([0., 1., 0., 1.0]),
+            });
+            geometry.push(Vertex3DColored {
+                position: Vertex3DPosition::new([nx + TSCALE_X, ny + TSCALE_Y, 0.0]),
+                color: VertexColor::new([1., 0., 0., 1.0]),
+            });
+            geometry.push(Vertex3DColored {
+                position: Vertex3DPosition::new([nx + TSCALE_X, ny - TSCALE_Y, 0.0]),
+                color: VertexColor::new([1., 0., 0., 1.0]),
+            });
+        }
+    }
+
+    geometry
+}
+
+fn compute_rectilinearize_matrix(width: f32, height: f32) -> Matrix4<f32> {
+    if width > height {
+        Matrix4::from_nonuniform_scale(height / width, 1.0, 1.0)
+    } else {
+        Matrix4::from_nonuniform_scale(1.0, width / height, 1.0)
+    }
+}
+
 fn main() {
     let mut surface = GlfwSurface::new(
-        WindowDim::Windowed(512, 512),
+        WindowDim::Windowed(1280, 720),
         "Hello, world!",
         WindowOpt::default(),
     )
@@ -90,17 +134,26 @@ fn main() {
     )
     .expect("full screen shade creation");
 
-    let (simple_prog, _) =
-        Program::<Vertex2DColored, (), ()>::from_strings(None, SIMPLE_VS, None, SIMPLE_FS)
-            .expect("simple program creation");
+    let (simple_prog, _) = Program::<Vertex3DColored, (), GeometryShadeInterface>::from_strings(
+        None, SIMPLE_VS, None, SIMPLE_FS,
+    )
+    .expect("simple program creation");
 
     let fullscreen_triangles = TessBuilder::new(&mut surface)
         .set_vertex_nb(6)
         .set_mode(Mode::Triangle)
         .build()
         .expect("Fullscreen tris");
+
+    let mut transform = Matrix4::<f32>::identity();
+    let mut rectanglize = {
+        let size = surface.size();
+        compute_rectilinearize_matrix(size[1] as f32, size[0] as f32)
+    };
+
+    let geometry = gen_geometry();
     let geometry_triangles = TessBuilder::new(&mut surface)
-        .add_vertices(&GEOM_VERTS[..])
+        .add_vertices(&geometry)
         .set_mode(Mode::Triangle)
         .build()
         .expect("Triangle geometry");
@@ -120,6 +173,7 @@ fn main() {
         .expect("Blur pass creation")
     };
     let mut resize_size = None;
+    let mut frame = 0;
 
     'app: loop {
         for event in surface.poll_events() {
@@ -145,15 +199,24 @@ fn main() {
                         height as u32 / BLUR_SIZE_FACTOR,
                     ],
                 )
-                .expect("Blur pass resize")
+                .expect("Blur pass resize");
+            rectanglize = compute_rectilinearize_matrix(width as f32, height as f32);
         }
+
+        transform = rectanglize
+            * Matrix4::from_nonuniform_scale(
+                1.0, // (frame as f32 / 100.0).sin(),
+                1.0, // (frame as f32 / 200.0).cos(),
+                1.0,
+            );
 
         // Main render
         surface.pipeline_builder().pipeline(
             &buffers.intermediate_buffer,
             [0.0, 0.0, 0.0, 0.0],
             |_, shader_gate| {
-                shader_gate.shade(&simple_prog, |render_gate, _| {
+                shader_gate.shade(&simple_prog, |render_gate, interface| {
+                    interface.transform.update(transform.into());
                     render_gate.render(RenderState::default(), |tesselation_gate| {
                         tesselation_gate.render(&mut surface, (&geometry_triangles).into());
                     })
@@ -187,5 +250,6 @@ fn main() {
         );
 
         surface.swap_buffers();
+        frame = frame + 1;
     }
 }
