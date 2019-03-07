@@ -9,7 +9,6 @@ use luminance::tess::Tess;
 use luminance::texture::{Dim2, Flat, Texture};
 
 use crate::error::LuminanceError;
-use crate::Vertex2DColored;
 
 luminance::uniform_interface! {
     struct BlurInterface {
@@ -19,7 +18,7 @@ luminance::uniform_interface! {
 }
 
 pub struct BlurPass<'a> {
-    program: Program<Vertex2DColored, (), BlurInterface>,
+    program: Program<(), (), BlurInterface>,
     buffers: [Framebuffer<Flat, Dim2, R11G11B10F, ()>; 2],
     fullscreen_triangles: &'a Tess,
     radius_factor: f32,
