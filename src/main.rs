@@ -69,46 +69,109 @@ luminance::uniform_interface! {
     }
 }
 
-fn gen_geometry() -> Vec<Vertex3DColored> {
-    const TRIANGLES_X: usize = 2;
-    const TRIANGLES_Y: usize = 2;
-    const TSCALE_X: f32 = 0.75 / (TRIANGLES_X as f32);
-    const TSCALE_Y: f32 = 0.75 / (TRIANGLES_Y as f32);
+#[inline]
+fn rand_color(max_rgb: f32, alpha: f32) -> [f32; 4] {
+    use rand::distributions::{Distribution, Uniform};
 
-    let mut geometry = Vec::with_capacity(6 * TRIANGLES_X * TRIANGLES_Y);
-    for x in 0..TRIANGLES_X {
-        let nx = (x as f32 + 0.5) / (TRIANGLES_X as f32) * 2.0 - 1.0;
-        for y in 0..TRIANGLES_Y {
-            let ny = (y as f32 + 0.5) / (TRIANGLES_Y as f32) * 2.0 - 1.0;
+    let distribution = Uniform::new_inclusive(0.0, max_rgb);
+    let mut rng = rand::thread_rng();
 
-            geometry.push(Vertex3DColored {
-                position: Vertex3DPosition::new([nx - TSCALE_X, ny - TSCALE_Y, 0.0]),
-                color: VertexColor::new([0., 1., 0., 1.0]),
-            });
-            geometry.push(Vertex3DColored {
-                position: Vertex3DPosition::new([nx - TSCALE_X, ny + TSCALE_Y, 0.0]),
-                color: VertexColor::new([0., 0., 1., 1.0]),
-            });
-            geometry.push(Vertex3DColored {
-                position: Vertex3DPosition::new([nx + TSCALE_X, ny + TSCALE_Y, 0.0]),
-                color: VertexColor::new([1., 0., 0., 1.0]),
-            });
-            geometry.push(Vertex3DColored {
-                position: Vertex3DPosition::new([nx - TSCALE_X, ny - TSCALE_Y, 0.0]),
-                color: VertexColor::new([0., 1., 0., 1.0]),
-            });
-            geometry.push(Vertex3DColored {
-                position: Vertex3DPosition::new([nx + TSCALE_X, ny + TSCALE_Y, 0.0]),
-                color: VertexColor::new([1., 0., 0., 1.0]),
-            });
-            geometry.push(Vertex3DColored {
-                position: Vertex3DPosition::new([nx + TSCALE_X, ny - TSCALE_Y, 0.0]),
-                color: VertexColor::new([1., 0., 0., 1.0]),
-            });
+    [
+        distribution.sample(&mut rng),
+        distribution.sample(&mut rng),
+        distribution.sample(&mut rng),
+        alpha,
+    ]
+}
+
+fn gen_geometry() -> (Vec<Vertex3DColored>, Vec<u32>) {
+    const COUNT_X: usize = 4;
+    const COUNT_Y: usize = 4;
+    const COUNT_Z: usize = 4;
+    const COUNT: usize = COUNT_X * COUNT_Y * COUNT_Z;
+    const SCALE: f32 = 0.5 / (COUNT_X as f32);
+
+    let mut geometry = Vec::with_capacity(8 * COUNT);
+    let mut indices = Vec::with_capacity(24 * COUNT);
+
+    for x in 0..COUNT_X {
+        let nx = ((x as f32 + 0.5) / (COUNT_X as f32) * 2.0 - 1.0) / (2.0_f32.sqrt());
+        for y in 0..COUNT_Y {
+            let ny = ((y as f32 + 0.5) / (COUNT_Y as f32) * 2.0 - 1.0) / (2.0_f32.sqrt());
+            for z in 0..COUNT_Z {
+                let nz = ((z as f32 + 0.5) / (COUNT_Z as f32) * 2.0 - 1.0) / (2.0_f32.sqrt());
+
+                let colors: Vec<[f32; 4]> = (0..8).map(|_| rand_color(1.1, 1.0)).collect();
+
+                for i in 0..8 {
+                    let x = if i & 1 != 0 { nx + SCALE } else { nx - SCALE };
+                    let y = if i & 2 != 0 { ny + SCALE } else { ny - SCALE };
+                    let z = if i & 4 != 0 { nz + SCALE } else { nz - SCALE };
+                    geometry.push(Vertex3DColored {
+                        position: Vertex3DPosition::new([x, y, z]),
+                        color: VertexColor::new(colors[i]),
+                    })
+                }
+
+                let index_base = (8 * ((z * COUNT_X * COUNT_Y) + (y * COUNT_X) + x)) as u32;
+                //        +-----+
+                //        |110  |111
+                //        |  0  |
+                //  ------+-----+-----+-----+
+                //  |110  |100  |101  |111  |110
+                //  |  1  |  2  |  3  |  4  |
+                //  ------+-----+-----+-----+
+                //        |000  |001   011   010
+                //        |  5  |
+                //        +-----+
+                //         010   011
+                // Faces 0, 2, and 3 are CCW
+                indices.push(index_base + 0b100); // Face 0
+                indices.push(index_base + 0b101);
+                indices.push(index_base + 0b110);
+                indices.push(index_base + 0b101);
+                indices.push(index_base + 0b110);
+                indices.push(index_base + 0b111);
+
+                indices.push(index_base + 0b010); // Face 1
+                indices.push(index_base + 0b110);
+                indices.push(index_base + 0b000);
+                indices.push(index_base + 0b110);
+                indices.push(index_base + 0b100);
+                indices.push(index_base + 0b000);
+
+                indices.push(index_base + 0b100); // Face 2
+                indices.push(index_base + 0b000);
+                indices.push(index_base + 0b001);
+                indices.push(index_base + 0b001);
+                indices.push(index_base + 0b101);
+                indices.push(index_base + 0b100);
+
+                indices.push(index_base + 0b101); // Face 3
+                indices.push(index_base + 0b001);
+                indices.push(index_base + 0b011);
+                indices.push(index_base + 0b101);
+                indices.push(index_base + 0b011);
+                indices.push(index_base + 0b111);
+
+                indices.push(index_base + 0b010); // Face 4
+                indices.push(index_base + 0b011);
+                indices.push(index_base + 0b111);
+                indices.push(index_base + 0b111);
+                indices.push(index_base + 0b110);
+                indices.push(index_base + 0b010);
+
+                indices.push(index_base + 0b000); // Face 5
+                indices.push(index_base + 0b001);
+                indices.push(index_base + 0b011);
+                indices.push(index_base + 0b011);
+                indices.push(index_base + 0b010);
+                indices.push(index_base + 0b000);
+            }
         }
     }
 
-    geometry
+    (geometry, indices)
 }
 
 fn compute_rectilinearize_matrix(width: f32, height: f32) -> Matrix4<f32> {
@@ -151,9 +214,10 @@ fn main() {
         compute_rectilinearize_matrix(size[1] as f32, size[0] as f32)
     };
 
-    let geometry = gen_geometry();
+    let (geometry, indices) = gen_geometry();
     let geometry_triangles = TessBuilder::new(&mut surface)
         .add_vertices(&geometry)
+        .set_indices(&indices)
         .set_mode(Mode::Triangle)
         .build()
         .expect("Triangle geometry");
@@ -204,11 +268,9 @@ fn main() {
         }
 
         transform = rectanglize
-            * Matrix4::from_nonuniform_scale(
-                1.0, // (frame as f32 / 100.0).sin(),
-                1.0, // (frame as f32 / 200.0).cos(),
-                1.0,
-            );
+            * Matrix4::from_angle_z(cgmath::Deg(1.0 * frame as f32))
+            * Matrix4::from_angle_x(cgmath::Deg(1.0 * 0.5 * frame as f32))
+            * Matrix4::from_angle_y(cgmath::Deg(1.0 * 0.25 * frame as f32));
 
         // Main render
         surface.pipeline_builder().pipeline(
