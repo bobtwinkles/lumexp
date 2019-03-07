@@ -7,7 +7,7 @@ extern crate luminance_derive;
 use luminance::context::GraphicsContext;
 use luminance::framebuffer::Framebuffer;
 use luminance::pipeline::BoundTexture;
-use luminance::pixel::{Depth32F, RGB32F, R11G11B10F, Floating};
+use luminance::pixel::{Depth32F, Floating, R11G11B10F, RGB32F};
 use luminance::render_state::RenderState;
 use luminance::shader::program::Program;
 use luminance::tess::{Mode, TessBuilder};
@@ -15,7 +15,9 @@ use luminance::texture::{Dim2, Dimensionable, Flat};
 use luminance_glfw::event::{Action, Key, WindowEvent};
 use luminance_glfw::surface::{GlfwSurface, Surface, WindowDim, WindowOpt};
 
+mod error;
 mod full_screen_tri;
+mod passes;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, VertexAttribSem)]
 pub enum Vertex2DColoredSemantics {
@@ -55,18 +57,13 @@ const BLUR_SIZE_FACTOR: u32 = 4;
 struct RenderBuffers {
     back_buffer: Framebuffer<Flat, Dim2, (), ()>,
     intermediate_buffer: Framebuffer<Flat, Dim2, (RGB32F, RGB32F), Depth32F>,
-    blur_buffer0: Framebuffer<Flat, Dim2, R11G11B10F, ()>,
-    blur_buffer1: Framebuffer<Flat, Dim2, R11G11B10F, ()>,
 }
 
 impl RenderBuffers {
     fn new<C: GraphicsContext>(c: &mut C, d: <Dim2 as Dimensionable>::Size) -> Self {
-        let half_d = [d[0] / BLUR_SIZE_FACTOR, d[1] / BLUR_SIZE_FACTOR];
         Self {
             back_buffer: Framebuffer::back_buffer(d),
             intermediate_buffer: Framebuffer::new(c, d, 0).expect("intermediate framebuffer"),
-            blur_buffer0: Framebuffer::new(c, half_d, 0).expect("blur framebuffer 0"),
-            blur_buffer1: Framebuffer::new(c, half_d, 0).expect("blur framebuffer 1"),
         }
     }
 }
@@ -93,14 +90,6 @@ fn main() {
     )
     .expect("full screen shade creation");
 
-    let (blur_prog, _) = Program::<(), (), BlurInterface>::from_strings(
-        None,
-        full_screen_tri::VS,
-        None,
-        include_str!("blur.glsl"),
-    )
-    .expect("blur shader");
-
     let (simple_prog, _) =
         Program::<Vertex2DColored, (), ()>::from_strings(None, SIMPLE_VS, None, SIMPLE_FS)
             .expect("simple program creation");
@@ -120,6 +109,16 @@ fn main() {
         let size = surface.size();
         RenderBuffers::new(&mut surface, size)
     };
+    let mut blur_pass = {
+        let size = surface.size();
+        passes::BlurPass::new(
+            &mut surface,
+            [size[0] / BLUR_SIZE_FACTOR, size[1] / BLUR_SIZE_FACTOR],
+            &fullscreen_triangles,
+            0.25,
+        )
+        .expect("Blur pass creation")
+    };
     let mut resize_size = None;
 
     'app: loop {
@@ -138,6 +137,15 @@ fn main() {
         if let Some((width, height)) = resize_size {
             resize_size = None;
             buffers = RenderBuffers::new(&mut surface, [width as u32, height as u32]);
+            blur_pass
+                .resize_buffers(
+                    &mut surface,
+                    [
+                        width as u32 / BLUR_SIZE_FACTOR,
+                        height as u32 / BLUR_SIZE_FACTOR,
+                    ],
+                )
+                .expect("Blur pass resize")
         }
 
         // Main render
@@ -156,61 +164,7 @@ fn main() {
         // Blur the bright texture, first injecting the intermediate buffer
         // brightness texture, and then flipping between horizontal and vertical
         // blurs
-        surface.pipeline_builder().pipeline(
-            &buffers.blur_buffer0,
-            [0.0, 0.0, 0.0, 0.0],
-            |pipeline, shader_gate| {
-                let tex = pipeline.bind_texture(&buffers.intermediate_buffer.color_slot().1);
-
-                shader_gate.shade(&blur_prog, |render_gate, interface| {
-                    interface.radius.update(0.25);
-                    interface.blur_tex.update(&tex);
-
-                    render_gate.render(RenderState::default(), |tesselation_gate| {
-                        tesselation_gate.render(&mut surface, (&fullscreen_triangles).into());
-                    })
-                })
-            },
-        );
-
-        const BLUR_RADIUS_FACTOR: f32 = 0.25;
-
-        for i in 0..2 {
-            let rad: f32 = (2 * i) as f32 * BLUR_RADIUS_FACTOR + 0.25;
-            surface.pipeline_builder().pipeline(
-                &buffers.blur_buffer1,
-                [0.0, 0.0, 0.0, 0.0],
-                |pipeline, shader_gate| {
-                    let tex = pipeline.bind_texture(buffers.blur_buffer0.color_slot());
-
-                    shader_gate.shade(&blur_prog, |render_gate, interface| {
-                        interface.radius.update(rad as f32);
-                        interface.blur_tex.update(&tex);
-
-                        render_gate.render(RenderState::default(), |tesselation_gate| {
-                            tesselation_gate.render(&mut surface, (&fullscreen_triangles).into());
-                        })
-                    })
-                },
-            );
-
-            surface.pipeline_builder().pipeline(
-                &buffers.blur_buffer0,
-                [0.0, 0.0, 0.0, 0.0],
-                |pipeline, shader_gate| {
-                    let tex = pipeline.bind_texture(&buffers.blur_buffer1.color_slot());
-
-                    shader_gate.shade(&blur_prog, |render_gate, interface| {
-                        interface.radius.update((rad as f32) + BLUR_RADIUS_FACTOR);
-                        interface.blur_tex.update(&tex);
-
-                        render_gate.render(RenderState::default(), |tesselation_gate| {
-                            tesselation_gate.render(&mut surface, (&fullscreen_triangles).into());
-                        })
-                    })
-                },
-            );
-        }
+        blur_pass.run(&mut surface, &buffers.intermediate_buffer.color_slot().1);
 
         // Final composite pass
         surface.pipeline_builder().pipeline(
@@ -218,7 +172,7 @@ fn main() {
             [0.0, 0.0, 0.0, 0.0],
             |pipeline, shader_gate| {
                 let main_tex = pipeline.bind_texture(&buffers.intermediate_buffer.color_slot().0);
-                let bright_tex = pipeline.bind_texture(&buffers.blur_buffer0.color_slot());
+                let bright_tex = pipeline.bind_texture(blur_pass.texture());
 
                 shader_gate.shade(&final_composite, |render_gate, interface| {
                     interface.main_tex.update(&main_tex);
