@@ -10,3 +10,4 @@ luminance-derive = { path = "../luminance-rs/luminance-derive" }
 luminance-glfw = { path = "../luminance-rs/luminance-glfw" }
 cgmath = "0.17"
 rand = "0.6"
+gltf = "0.11"

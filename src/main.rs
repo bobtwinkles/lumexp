@@ -85,107 +85,76 @@ fn rand_color(max_rgb: f32, alpha: f32) -> [f32; 4] {
     ]
 }
 
-const COUNT_X: usize = 1;
-const COUNT_Y: usize = 1;
-const COUNT_Z: usize = 1;
-const COUNT: usize = COUNT_X * COUNT_Y * COUNT_Z;
-
 fn gen_geometry() -> (Vec<Vertex3DColored>, Vec<u32>) {
-    const SCALE: f32 = 0.5 / (COUNT_X as f32);
-    const BOUNDS_SCALE: f32 = 0.5;
+    struct DedupKey {
+        position: [f32; 3],
+    }
 
-    let mut geometry = Vec::with_capacity(8 * COUNT);
-    let mut indices = Vec::with_capacity(24 * COUNT);
-    let mut rng = rand::thread_rng();
-    let jitter = Uniform::new_inclusive(-SCALE * 0.3, SCALE * 0.3);
-
-    for x in 0..COUNT_X {
-        let nx = ((x as f32 + 0.5) / (COUNT_X as f32) * 2.0 - 1.0) * BOUNDS_SCALE;
-        for y in 0..COUNT_Y {
-            let ny = ((y as f32 + 0.5) / (COUNT_Y as f32) * 2.0 - 1.0) * BOUNDS_SCALE;
-            for z in 0..COUNT_Z {
-                let nz = ((z as f32 + 0.5) / (COUNT_Z as f32) * 2.0 - 1.0) * BOUNDS_SCALE;
-
-                let colors: Vec<[f32; 4]> = (0..8).map(|_| rand_color(1.1, 1.0)).collect();
-
-                for i in 0..8 {
-                    let x =
-                        if i & 1 != 0 { nx + SCALE } else { nx - SCALE } + jitter.sample(&mut rng);
-                    let y =
-                        if i & 2 != 0 { ny + SCALE } else { ny - SCALE } + jitter.sample(&mut rng);
-                    let z =
-                        if i & 4 != 0 { nz + SCALE } else { nz - SCALE } + jitter.sample(&mut rng);
-                    geometry.push(Vertex3DColored {
-                        position: Vertex3DPosition::new([x, y, z]),
-                        color: VertexColor::new(colors[i]),
-                        // color: VertexColor::new([
-                        //     if i & 1 != 0 { 1.0 } else { 0.0 },
-                        //     if i & 2 != 0 { 1.0 } else { 0.0 },
-                        //     if i & 4 != 0 { 1.0 } else { 0.0 },
-                        //     1.0,
-                        // ]),
-                    })
-                }
-
-                let index_base = (8 * ((z * COUNT_X * COUNT_Y) + (y * COUNT_X) + x)) as u32;
-                //        +-----+
-                //        |110  |111
-                //        |  0  |
-                //  ------+-----+-----+-----+
-                //  |110  |100  |101  |111  |110
-                //  |  1  |  2  |  3  |  4  |
-                //  ------+-----+-----+-----+
-                //        |000  |001   011   010
-                //        |  5  |
-                //        +-----+
-                //         010   011
-                // Faces 0, 2, and 3 are CCW
-                indices.push(index_base + 0b100); // Face 0 OK
-                indices.push(index_base + 0b110);
-                indices.push(index_base + 0b101);
-                indices.push(index_base + 0b110);
-                indices.push(index_base + 0b111);
-                indices.push(index_base + 0b101);
-
-                indices.push(index_base + 0b010); // Face 1 OK
-                indices.push(index_base + 0b110);
-                indices.push(index_base + 0b000);
-                indices.push(index_base + 0b110);
-                indices.push(index_base + 0b100);
-                indices.push(index_base + 0b000);
-
-                indices.push(index_base + 0b100); // Face 2 OK
-                indices.push(index_base + 0b001);
-                indices.push(index_base + 0b000);
-                indices.push(index_base + 0b001);
-                indices.push(index_base + 0b100);
-                indices.push(index_base + 0b101);
-
-                indices.push(index_base + 0b101); // Face 3 OK
-                indices.push(index_base + 0b011);
-                indices.push(index_base + 0b001);
-                indices.push(index_base + 0b101);
-                indices.push(index_base + 0b111);
-                indices.push(index_base + 0b011);
-
-                indices.push(index_base + 0b010); // Face 4 OK
-                indices.push(index_base + 0b011);
-                indices.push(index_base + 0b111);
-                indices.push(index_base + 0b111);
-                indices.push(index_base + 0b110);
-                indices.push(index_base + 0b010);
-
-                indices.push(index_base + 0b000); // Face 5 OK
-                indices.push(index_base + 0b001);
-                indices.push(index_base + 0b011);
-                indices.push(index_base + 0b011);
-                indices.push(index_base + 0b010);
-                indices.push(index_base + 0b000);
-            }
+    impl DedupKey {
+        fn quantized_pos(&self) -> [i32; 3] {
+            [
+                (self.position[0] * 4096.0) as i32,
+                (self.position[1] * 4096.0) as i32,
+                (self.position[2] * 4096.0) as i32,
+            ]
         }
     }
 
-    (geometry, indices)
+    impl PartialEq for DedupKey {
+        fn eq(&self, o: &DedupKey) -> bool {
+            self.quantized_pos() == o.quantized_pos()
+        }
+    }
+
+    impl Eq for DedupKey {}
+
+    impl std::hash::Hash for DedupKey {
+        fn hash<H>(&self, state: &mut H)
+        where
+            H: std::hash::Hasher,
+        {
+            use std::hash::Hash;
+            Hash::hash(&self.quantized_pos(), state);
+        }
+    }
+
+    let (gltf, buffers, _) =
+        gltf::import("res/sphere_cluster.glb").expect("Failed to  read icosphere data");
+
+    let mut verts = Vec::new();
+    let mut index_map = std::collections::HashMap::new();
+    let mut indicies = Vec::new();
+
+    assert!(gltf.meshes().len() == 1);
+    let mesh = gltf.meshes().next().unwrap();
+
+    for primitive in mesh.primitives() {
+        use gltf::mesh::Semantic;
+        assert!(primitive.mode() == gltf::mesh::Mode::Triangles);
+
+        let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+        if let Some(iter) = reader.read_positions() {
+            for mut vertex_position in iter {
+                let index = index_map
+                    .entry(DedupKey {
+                        position: vertex_position,
+                    })
+                    .or_insert_with(|| {
+                        let tr = verts.len() as u32;
+                        verts.push(Vertex3DColored {
+                            position: Vertex3DPosition::new(vertex_position),
+                            color: VertexColor::new(rand_color(1.1, 1.0)),
+                        });
+
+                        tr
+                    });
+                indicies.push(*index);
+            }
+        }
+    }
+    assert!(indicies.len() % 3 == 0);
+
+    (verts, indicies)
 }
 
 fn compute_rectilinearize_matrix(width: f32, height: f32) -> Matrix4<f32> {
@@ -227,28 +196,31 @@ fn main() {
         compute_rectilinearize_matrix(size[1] as f32, size[0] as f32)
     };
 
-    let mut geometry_buffers = {
+    let (mut geometry_buffers, vertex_count) = {
         let (geometry, indices) = gen_geometry();
-        [
-            TessBuilder::new(&mut surface)
-                .add_vertices(&geometry)
-                .set_indices(&indices)
-                .set_mode(Mode::Triangle)
-                .build()
-                .expect("geometry 0"),
-            TessBuilder::new(&mut surface)
-                .add_vertices(&geometry)
-                .set_indices(&indices)
-                .set_mode(Mode::Triangle)
-                .build()
-                .expect("geometry 1"),
-            TessBuilder::new(&mut surface)
-                .add_vertices(&geometry)
-                .set_indices(&indices)
-                .set_mode(Mode::Triangle)
-                .build()
-                .expect("geometry 2"),
-        ]
+        (
+            [
+                TessBuilder::new(&mut surface)
+                    .add_vertices(&geometry)
+                    .set_indices(&indices)
+                    .set_mode(Mode::Triangle)
+                    .build()
+                    .expect("geometry 0"),
+                TessBuilder::new(&mut surface)
+                    .add_vertices(&geometry)
+                    .set_indices(&indices)
+                    .set_mode(Mode::Triangle)
+                    .build()
+                    .expect("geometry 1"),
+                TessBuilder::new(&mut surface)
+                    .add_vertices(&geometry)
+                    .set_indices(&indices)
+                    .set_mode(Mode::Triangle)
+                    .build()
+                    .expect("geometry 2"),
+            ],
+            geometry.len(),
+        )
     };
 
     let mut buffers = {
@@ -268,7 +240,7 @@ fn main() {
     let mut resize_size = None;
     let mut frame = 0;
 
-    let mut colors: Vec<[f32; 4]> = (0..(COUNT * 36)).map(|_| rand_color(1.1, 1.0)).collect();
+    let mut colors: Vec<[f32; 4]> = (0..vertex_count).map(|_| rand_color(1.1, 1.0)).collect();
 
     'app: loop {
         for event in surface.poll_events() {
@@ -299,9 +271,10 @@ fn main() {
         }
 
         let transform = rectanglize
-            * Matrix4::from_angle_z(cgmath::Deg(0.5 * frame as f32))
-            * Matrix4::from_angle_x(cgmath::Deg(0.5 * 0.5 * frame as f32))
-            * Matrix4::from_angle_y(cgmath::Deg(0.5 * 0.25 * frame as f32));
+            * Matrix4::from_scale(0.5)
+            * Matrix4::from_angle_x(cgmath::Deg(270.0 - 45.0))
+            * Matrix4::from_angle_z(cgmath::Deg(frame as f32))
+            ;
 
         let curr_geometry_buffer = frame % geometry_buffers.len();
 
@@ -338,9 +311,9 @@ fn main() {
 
             for i in 0..next_buffer_data.len() {
                 next_buffer_data[i].color.repr = colors[i];
-                for j in 0..3 {
-                    colors[i][j] = (colors[i][j] + 0.01) % 1.1;
-                }
+                // for j in 0..3 {
+                //     colors[i][j] = (colors[i][j] + 0.01) % 1.1;
+                // }
             }
         }
 
