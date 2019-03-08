@@ -16,6 +16,8 @@ use luminance::texture::{Dim2, Dimensionable, Flat};
 use luminance_glfw::event::{Action, Key, WindowEvent};
 use luminance_glfw::surface::{GlfwSurface, Surface, WindowDim, WindowOpt};
 
+use rand::distributions::{Distribution, Uniform};
+
 use cgmath::prelude::*;
 use cgmath::Matrix4;
 
@@ -72,8 +74,6 @@ luminance::uniform_interface! {
 
 #[inline]
 fn rand_color(max_rgb: f32, alpha: f32) -> [f32; 4] {
-    use rand::distributions::{Distribution, Uniform};
-
     let distribution = Uniform::new_inclusive(0.0, max_rgb);
     let mut rng = rand::thread_rng();
 
@@ -86,31 +86,43 @@ fn rand_color(max_rgb: f32, alpha: f32) -> [f32; 4] {
 }
 
 fn gen_geometry() -> (Vec<Vertex3DColored>, Vec<u32>) {
-    const COUNT_X: usize = 4;
-    const COUNT_Y: usize = 4;
-    const COUNT_Z: usize = 4;
+    const COUNT_X: usize = 20;
+    const COUNT_Y: usize = 20;
+    const COUNT_Z: usize = 20;
     const COUNT: usize = COUNT_X * COUNT_Y * COUNT_Z;
     const SCALE: f32 = 0.5 / (COUNT_X as f32);
+    const BOUNDS_SCALE: f32 = 0.25;
 
     let mut geometry = Vec::with_capacity(8 * COUNT);
     let mut indices = Vec::with_capacity(24 * COUNT);
+    let mut rng = rand::thread_rng();
+    let mut jitter = Uniform::new_inclusive(-SCALE * 0.3, SCALE * 0.3);
 
     for x in 0..COUNT_X {
-        let nx = ((x as f32 + 0.5) / (COUNT_X as f32) * 2.0 - 1.0) / (2.0_f32.sqrt());
+        let nx = ((x as f32 + 0.5) / (COUNT_X as f32) * 2.0 - 1.0) * BOUNDS_SCALE;
         for y in 0..COUNT_Y {
-            let ny = ((y as f32 + 0.5) / (COUNT_Y as f32) * 2.0 - 1.0) / (2.0_f32.sqrt());
+            let ny = ((y as f32 + 0.5) / (COUNT_Y as f32) * 2.0 - 1.0) * BOUNDS_SCALE;
             for z in 0..COUNT_Z {
-                let nz = ((z as f32 + 0.5) / (COUNT_Z as f32) * 2.0 - 1.0) / (2.0_f32.sqrt());
+                let nz = ((z as f32 + 0.5) / (COUNT_Z as f32) * 2.0 - 1.0) * BOUNDS_SCALE;
 
                 let colors: Vec<[f32; 4]> = (0..8).map(|_| rand_color(1.1, 1.0)).collect();
 
                 for i in 0..8 {
-                    let x = if i & 1 != 0 { nx + SCALE } else { nx - SCALE };
-                    let y = if i & 2 != 0 { ny + SCALE } else { ny - SCALE };
-                    let z = if i & 4 != 0 { nz + SCALE } else { nz - SCALE };
+                    let x =
+                        if i & 1 != 0 { nx + SCALE } else { nx - SCALE } + jitter.sample(&mut rng);
+                    let y =
+                        if i & 2 != 0 { ny + SCALE } else { ny - SCALE } + jitter.sample(&mut rng);
+                    let z =
+                        if i & 4 != 0 { nz + SCALE } else { nz - SCALE } + jitter.sample(&mut rng);
                     geometry.push(Vertex3DColored {
                         position: Vertex3DPosition::new([x, y, z]),
                         color: VertexColor::new(colors[i]),
+                        // color: VertexColor::new([
+                        //     if i & 1 != 0 { 1.0 } else { 0.0 },
+                        //     if i & 2 != 0 { 1.0 } else { 0.0 },
+                        //     if i & 4 != 0 { 1.0 } else { 0.0 },
+                        //     1.0,
+                        // ]),
                     })
                 }
 
@@ -269,9 +281,9 @@ fn main() {
         }
 
         transform = rectanglize
-            * Matrix4::from_angle_z(cgmath::Deg(1.0 * frame as f32))
-            * Matrix4::from_angle_x(cgmath::Deg(1.0 * 0.5 * frame as f32))
-            * Matrix4::from_angle_y(cgmath::Deg(1.0 * 0.25 * frame as f32));
+            * Matrix4::from_angle_z(cgmath::Deg(0.5 * frame as f32))
+            * Matrix4::from_angle_x(cgmath::Deg(0.5 * 0.5 * frame as f32))
+            * Matrix4::from_angle_y(cgmath::Deg(0.5 * 0.25 * frame as f32));
 
         // Main render
         surface.pipeline_builder().pipeline(
