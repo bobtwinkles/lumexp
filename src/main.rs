@@ -86,12 +86,12 @@ fn rand_color(max_rgb: f32, alpha: f32) -> [f32; 4] {
 }
 
 fn gen_geometry() -> (Vec<Vertex3DColored>, Vec<u32>) {
-    const COUNT_X: usize = 20;
-    const COUNT_Y: usize = 20;
-    const COUNT_Z: usize = 20;
+    const COUNT_X: usize = 2;
+    const COUNT_Y: usize = 2;
+    const COUNT_Z: usize = 2;
     const COUNT: usize = COUNT_X * COUNT_Y * COUNT_Z;
     const SCALE: f32 = 0.5 / (COUNT_X as f32);
-    const BOUNDS_SCALE: f32 = 0.25;
+    const BOUNDS_SCALE: f32 = 0.5;
 
     let mut geometry = Vec::with_capacity(8 * COUNT);
     let mut indices = Vec::with_capacity(24 * COUNT);
@@ -227,13 +227,29 @@ fn main() {
         compute_rectilinearize_matrix(size[1] as f32, size[0] as f32)
     };
 
-    let (geometry, indices) = gen_geometry();
-    let geometry_triangles = TessBuilder::new(&mut surface)
-        .add_vertices(&geometry)
-        .set_indices(&indices)
-        .set_mode(Mode::Triangle)
-        .build()
-        .expect("Triangle geometry");
+    let mut geometry_buffers = {
+        let (geometry, indices) = gen_geometry();
+        [
+            TessBuilder::new(&mut surface)
+                .add_vertices(&geometry)
+                .set_indices(&indices)
+                .set_mode(Mode::Triangle)
+                .build()
+                .expect("geometry 0"),
+            TessBuilder::new(&mut surface)
+                .add_vertices(&geometry)
+                .set_indices(&indices)
+                .set_mode(Mode::Triangle)
+                .build()
+                .expect("geometry 1"),
+            TessBuilder::new(&mut surface)
+                .add_vertices(&geometry)
+                .set_indices(&indices)
+                .set_mode(Mode::Triangle)
+                .build()
+                .expect("geometry 2"),
+        ]
+    };
 
     let mut buffers = {
         let size = surface.size();
@@ -285,6 +301,8 @@ fn main() {
             * Matrix4::from_angle_x(cgmath::Deg(0.5 * 0.5 * frame as f32))
             * Matrix4::from_angle_y(cgmath::Deg(0.5 * 0.25 * frame as f32));
 
+        let curr_geometry_buffer = frame % geometry_buffers.len();
+
         // Main render
         surface.pipeline_builder().pipeline(
             &buffers.intermediate_buffer,
@@ -298,12 +316,30 @@ fn main() {
                             FaceCullingMode::Front,
                         )),
                         |tesselation_gate| {
-                            tesselation_gate.render(&mut surface, (&geometry_triangles).into());
+                            tesselation_gate.render(
+                                &mut surface,
+                                (&geometry_buffers[curr_geometry_buffer]).into(),
+                            );
                         },
                     )
                 })
             },
         );
+
+        {
+            // Update the geometry by tweaking color values
+            let next_buffer_index =
+                (curr_geometry_buffer + geometry_buffers.len() - 1) % geometry_buffers.len();
+            let mut next_buffer_data = geometry_buffers[next_buffer_index]
+                .as_slice_mut::<Vertex3DColored>()
+                .expect("Getting next buffer binding");
+
+            for i in 0..next_buffer_data.len() {
+                for j in 0 .. 4 {
+                    next_buffer_data[i].color.repr[j] = (next_buffer_data[i].color.repr[j] + 0.01) % 1.1;
+                }
+            }
+        }
 
         // Blur the bright texture, first injecting the intermediate buffer
         // brightness texture, and then flipping between horizontal and vertical
