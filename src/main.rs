@@ -85,18 +85,19 @@ fn rand_color(max_rgb: f32, alpha: f32) -> [f32; 4] {
     ]
 }
 
+const COUNT_X: usize = 1;
+const COUNT_Y: usize = 1;
+const COUNT_Z: usize = 1;
+const COUNT: usize = COUNT_X * COUNT_Y * COUNT_Z;
+
 fn gen_geometry() -> (Vec<Vertex3DColored>, Vec<u32>) {
-    const COUNT_X: usize = 2;
-    const COUNT_Y: usize = 2;
-    const COUNT_Z: usize = 2;
-    const COUNT: usize = COUNT_X * COUNT_Y * COUNT_Z;
     const SCALE: f32 = 0.5 / (COUNT_X as f32);
     const BOUNDS_SCALE: f32 = 0.5;
 
     let mut geometry = Vec::with_capacity(8 * COUNT);
     let mut indices = Vec::with_capacity(24 * COUNT);
     let mut rng = rand::thread_rng();
-    let mut jitter = Uniform::new_inclusive(-SCALE * 0.3, SCALE * 0.3);
+    let jitter = Uniform::new_inclusive(-SCALE * 0.3, SCALE * 0.3);
 
     for x in 0..COUNT_X {
         let nx = ((x as f32 + 0.5) / (COUNT_X as f32) * 2.0 - 1.0) * BOUNDS_SCALE;
@@ -221,7 +222,6 @@ fn main() {
         .build()
         .expect("Fullscreen tris");
 
-    let mut transform = Matrix4::<f32>::identity();
     let mut rectanglize = {
         let size = surface.size();
         compute_rectilinearize_matrix(size[1] as f32, size[0] as f32)
@@ -268,6 +268,8 @@ fn main() {
     let mut resize_size = None;
     let mut frame = 0;
 
+    let mut colors: Vec<[f32; 4]> = (0..(COUNT * 36)).map(|_| rand_color(1.1, 1.0)).collect();
+
     'app: loop {
         for event in surface.poll_events() {
             match event {
@@ -296,7 +298,7 @@ fn main() {
             rectanglize = compute_rectilinearize_matrix(width as f32, height as f32);
         }
 
-        transform = rectanglize
+        let transform = rectanglize
             * Matrix4::from_angle_z(cgmath::Deg(0.5 * frame as f32))
             * Matrix4::from_angle_x(cgmath::Deg(0.5 * 0.5 * frame as f32))
             * Matrix4::from_angle_y(cgmath::Deg(0.5 * 0.25 * frame as f32));
@@ -335,8 +337,9 @@ fn main() {
                 .expect("Getting next buffer binding");
 
             for i in 0..next_buffer_data.len() {
-                for j in 0 .. 4 {
-                    next_buffer_data[i].color.repr[j] = (next_buffer_data[i].color.repr[j] + 0.01) % 1.1;
+                next_buffer_data[i].color.repr = colors[i];
+                for j in 0..3 {
+                    colors[i][j] = (colors[i][j] + 0.01) % 1.1;
                 }
             }
         }
