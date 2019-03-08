@@ -244,6 +244,7 @@ fn main() {
     let mut colors: Vec<[f32; 4]> = (0..vertex_count).map(|_| rand_color(1.1, 1.0)).collect();
 
     let mut look_angles = (90.0, 0.0);
+    let mut look_angles_baseline = look_angles;
     let mut position = cgmath::Vector3::new(0.0, 0.0, 0.0);
     // Keys: WSADQE
     let mut key_states = [false, false, false, false, false, false];
@@ -287,11 +288,12 @@ fn main() {
                 WindowEvent::Key(Key::F1, _, Action::Press, _) => {
                     position = cgmath::Vector3::new(4.5, -4.5, 0.55);
                     look_angles = (94.6, -45.0);
+                    look_angles_baseline = look_angles;
                 }
                 WindowEvent::CursorPos(x, y) => {
                     if control_active {
-                        look_angles.0 = 90.0 + y as f32 / 25.0;
-                        look_angles.1 = x as f32 / -25.0;
+                        look_angles.0 = look_angles_baseline.0 + y as f32 / 25.0;
+                        look_angles.1 = look_angles_baseline.1 + x as f32 / -25.0;
                     }
                 }
                 WindowEvent::FramebufferSize(width, height) => {
