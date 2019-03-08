@@ -5,6 +5,7 @@ extern crate luminance;
 extern crate luminance_derive;
 
 use luminance::context::GraphicsContext;
+use luminance::face_culling::{FaceCulling, FaceCullingMode, FaceCullingOrder};
 use luminance::framebuffer::Framebuffer;
 use luminance::pipeline::BoundTexture;
 use luminance::pixel::{Depth32F, Floating, R11G11B10F, RGB32F};
@@ -126,42 +127,42 @@ fn gen_geometry() -> (Vec<Vertex3DColored>, Vec<u32>) {
                 //        +-----+
                 //         010   011
                 // Faces 0, 2, and 3 are CCW
-                indices.push(index_base + 0b100); // Face 0
-                indices.push(index_base + 0b101);
+                indices.push(index_base + 0b100); // Face 0 OK
                 indices.push(index_base + 0b110);
                 indices.push(index_base + 0b101);
                 indices.push(index_base + 0b110);
                 indices.push(index_base + 0b111);
+                indices.push(index_base + 0b101);
 
-                indices.push(index_base + 0b010); // Face 1
+                indices.push(index_base + 0b010); // Face 1 OK
                 indices.push(index_base + 0b110);
                 indices.push(index_base + 0b000);
                 indices.push(index_base + 0b110);
                 indices.push(index_base + 0b100);
                 indices.push(index_base + 0b000);
 
-                indices.push(index_base + 0b100); // Face 2
+                indices.push(index_base + 0b100); // Face 2 OK
+                indices.push(index_base + 0b001);
                 indices.push(index_base + 0b000);
                 indices.push(index_base + 0b001);
-                indices.push(index_base + 0b001);
-                indices.push(index_base + 0b101);
                 indices.push(index_base + 0b100);
-
-                indices.push(index_base + 0b101); // Face 3
-                indices.push(index_base + 0b001);
-                indices.push(index_base + 0b011);
                 indices.push(index_base + 0b101);
-                indices.push(index_base + 0b011);
-                indices.push(index_base + 0b111);
 
-                indices.push(index_base + 0b010); // Face 4
+                indices.push(index_base + 0b101); // Face 3 OK
+                indices.push(index_base + 0b011);
+                indices.push(index_base + 0b001);
+                indices.push(index_base + 0b101);
+                indices.push(index_base + 0b111);
+                indices.push(index_base + 0b011);
+
+                indices.push(index_base + 0b010); // Face 4 OK
                 indices.push(index_base + 0b011);
                 indices.push(index_base + 0b111);
                 indices.push(index_base + 0b111);
                 indices.push(index_base + 0b110);
                 indices.push(index_base + 0b010);
 
-                indices.push(index_base + 0b000); // Face 5
+                indices.push(index_base + 0b000); // Face 5 OK
                 indices.push(index_base + 0b001);
                 indices.push(index_base + 0b011);
                 indices.push(index_base + 0b011);
@@ -279,9 +280,15 @@ fn main() {
             |_, shader_gate| {
                 shader_gate.shade(&simple_prog, |render_gate, interface| {
                     interface.transform.update(transform.into());
-                    render_gate.render(RenderState::default(), |tesselation_gate| {
-                        tesselation_gate.render(&mut surface, (&geometry_triangles).into());
-                    })
+                    render_gate.render(
+                        RenderState::default().set_face_culling(FaceCulling::new(
+                            FaceCullingOrder::CW,
+                            FaceCullingMode::Front,
+                        )),
+                        |tesselation_gate| {
+                            tesselation_gate.render(&mut surface, (&geometry_triangles).into());
+                        },
+                    )
                 })
             },
         );
